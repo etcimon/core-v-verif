@@ -145,17 +145,23 @@ int Simulation::run() {
     if (standalone_mode) {
       // Round-robin one insn per hart (needed for OpenSBI lottery / IPI /
       // CLINT MSWI). Skip the per-insn co-sim host/target switch. Tick
-      // CLINT/UART every INTERLEAVE rounds. Do NOT yield to the HTIF target
-      // thread: that co-sim idle path can spuriously complete the HTIF run
-      // (exit_code 0) mid-firmware when we are not using the per-insn
-      // handshake. Poll tohost via done() after guest stores instead.
+      // CLINT/UART every INTERLEAVE rounds. The suspended HTIF coroutine is
+      // resumed only for an actual pending command (a nonzero tohost store):
+      // firmware that never posts a request keeps this direct stepping path.
       size_t since_tick = 0;
       st_rvfi dummy{};
       while (!sim_t::done()) {
         for (size_t i = 0; i < procs.size() && !sim_t::done(); i++) {
           ((Processor *)procs[i])->step(1, dummy);
           ++total_steps;
-          if (max_steps_enabled && max_steps < total_steps)
+          const reg_t tohost = get_tohost_addr();
+          if (tohost && from_target(memif().read_uint64(tohost)) != 0) {
+            // Resume the suspended HTIF loop to service this command and
+            // publish its reply or exit status before stepping the guest.
+            host = context_t::current();
+            target.switch_to();
+          }
+          if (max_steps_enabled && max_steps < total_steps && !sim_t::done())
             throw std::ios_base::failure("Max steps exceeded");
         }
         ++since_tick;
@@ -176,8 +182,9 @@ int Simulation::run() {
         (void)this->step(n, vreference);
       }
     }
-  } catch (std::ios_base::failure e) {
-    std::cout << "[SPIKE] Max steps exceeded!" << std::endl;
+  } catch (const std::ios_base::failure &e) {
+    std::cerr << "[SPIKE] " << e.what() << std::endl;
+    return 124;
   }
   return sim_t::exit_code();
 }

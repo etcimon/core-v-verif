@@ -623,11 +623,6 @@ int main(int argc, char** argv)
   }
 
   openhw::Simulation::default_params(params);
-  if (max_steps != 0) {
-    params.set_uint64_t("/top/", "max_steps", max_steps);
-    params.set_bool("/top/", "max_steps_enabled", true);
-    std::cout << "[SPIKE] Max simulation steps: " << max_steps << std::endl;
-  }
   openhw::Params::cfg_to_params(cfg, params);
   params.set_uint64_t("/top/", "num_procs", cfg.nprocs());
   // Propagate CLI --isa/--priv to every hart; secondary cores otherwise fall
@@ -641,6 +636,12 @@ int main(int argc, char** argv)
   }
   if(paramSetter != NULL)
     paramSetter->setParams();
+  // An explicit CLI step limit overrides the parameter-file default.
+  if (max_steps != 0) {
+    params.set_uint64_t("/top/", "max_steps", max_steps);
+    params.set_bool("/top/", "max_steps_enabled", true);
+    std::cout << "[SPIKE] Max simulation steps: " << max_steps << std::endl;
+  }
   openhw::Param param = params.get("/top/core/0/misa_we");
   std::cerr << "[spike.cc:main()] Value of '/top/core/0/misa_we' = " << (param.name != "" ? (param.a_bool ? "true" : "false") : "UNDEFINED") << "\n";
 
